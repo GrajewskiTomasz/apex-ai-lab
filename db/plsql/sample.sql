@@ -1,1 +1,0 @@
-paczki, typy, procedury
