@@ -148,7 +148,45 @@ begin
 end;
 /
 
-prompt === 5) Smoke ===
+prompt === 5) Packages (NL->SQL v0 stub) ===
+@@plsql/ai_log.pks
+@@plsql/ai_log.pkb
+@@plsql/ai_sql_guard.pks
+@@plsql/ai_sql_guard.pkb
+@@plsql/ai_sql_exec.pks
+@@plsql/ai_sql_exec.pkb
+@@plsql/ai_nl2sql.pks
+@@plsql/ai_nl2sql.pkb
+
+prompt === 5.1) Compile check ===
+declare
+  l_cnt number;
+begin
+  select count(*)
+    into l_cnt
+    from user_errors
+   where name in ('AI_LOG','AI_SQL_GUARD','AI_SQL_EXEC','AI_NL2SQL')
+     and type in ('PACKAGE','PACKAGE BODY');
+
+  if l_cnt > 0 then
+    dbms_output.put_line('ERROR: compile errors in NL->SQL packages: ' || l_cnt);
+    for r in (
+      select name, type, line, position, text
+        from user_errors
+       where name in ('AI_LOG','AI_SQL_GUARD','AI_SQL_EXEC','AI_NL2SQL')
+         and type in ('PACKAGE','PACKAGE BODY')
+       order by name, type, sequence
+    ) loop
+      dbms_output.put_line(r.name || ' ' || r.type || ' ' || r.line || ':' || r.position || ' ' || r.text);
+    end loop;
+    raise_application_error(-20010, 'Install failed: package compile errors');
+  else
+    dbms_output.put_line('OK: packages compiled.');
+  end if;
+end;
+/
+  
+prompt === 6) Smoke ===
 @@../scripts/smoke.sql
 
 prompt === install.sql done ===
