@@ -12,29 +12,7 @@ prompt === install.sql start ===
 prompt User:
 select user from dual;
 
-prompt === 0) Best-effort: role + grants (may fail on APEX Cloud) ===
-declare
-  e_ins_priv exception;
-  pragma exception_init(e_ins_priv, -1031); -- ORA-01031
-begin
-  begin
-    execute immediate 'create role AI_QUERY_ROLE';
-    dbms_output.put_line('OK: created role AI_QUERY_ROLE');
-  exception
-    when e_ins_priv then
-      dbms_output.put_line('SKIP: no privilege to create role AI_QUERY_ROLE');
-    when others then
-      if sqlcode = -1921 then
-        dbms_output.put_line('OK: role AI_QUERY_ROLE already exists');
-      else
-        raise;
-      end if;
-  end;
-end;
-/
--- grants will be attempted after views exist
-
-prompt === 1) Infra tables for NL->SQL (log + whitelist) ===
+prompt === 0) Infra tables for NL->SQL (log + whitelist) ===
 
 begin
   execute immediate 'drop table AI_NL2SQL_LOG purge';
@@ -103,10 +81,10 @@ comment on column AI_NL2SQL_WHITELIST.enabled_yn is 'Czy wlaczone; Y/N.';
 comment on column AI_NL2SQL_WHITELIST.purpose is 'Opis zastosowania widoku; dla kontekstu i kontroli.';
 comment on column AI_NL2SQL_WHITELIST.created_at is 'Czas dodania wpisu.';
 
-prompt === 2) Domain + views + comments + seed ===
+prompt === 1) Domain + views + comments + seed ===
 @@seed/sales_seed.sql
 
-prompt === 3) Seed whitelist entries (based on SALES seed views) ===
+prompt === 2) Seed whitelist entries (based on SALES seed views) ===
 merge into AI_NL2SQL_WHITELIST t
 using (
   select 'AI_V_SALES_ORDER_LINES' view_name, 'Y' enabled_yn,
@@ -126,29 +104,7 @@ when not matched then
 
 commit;
 
-prompt === 4) Best-effort: grants to AI_QUERY_ROLE (may fail) ===
-declare
-  e_ins_priv exception;
-  pragma exception_init(e_ins_priv, -1031); -- ORA-01031
-begin
-  begin
-    execute immediate 'grant select on AI_V_SALES_ORDER_LINES to AI_QUERY_ROLE';
-    execute immediate 'grant select on AI_V_SALES_ORDER_DAILY to AI_QUERY_ROLE';
-    dbms_output.put_line('OK: granted select on AI_V_SALES_* to AI_QUERY_ROLE');
-  exception
-    when e_ins_priv then
-      dbms_output.put_line('SKIP: no privilege to grant to AI_QUERY_ROLE');
-    when others then
-      if sqlcode in (-1919, -1921) then
-        dbms_output.put_line('SKIP: role missing or conflict (AI_QUERY_ROLE)');
-      else
-        raise;
-      end if;
-  end;
-end;
-/
-
-prompt === 5) Packages (NL->SQL v0 stub) ===
+prompt === 3) Packages (NL->SQL v0 stub) ===
 @@plsql/ai_log.pks
 @@plsql/ai_log.pkb
 @@plsql/ai_sql_guard.pks
@@ -158,7 +114,7 @@ prompt === 5) Packages (NL->SQL v0 stub) ===
 @@plsql/ai_nl2sql.pks
 @@plsql/ai_nl2sql.pkb
 
-prompt === 5.1) Compile check ===
+prompt === 3.1) Compile check ===
 declare
   l_cnt number;
 begin
@@ -186,7 +142,7 @@ begin
 end;
 /
   
-prompt === 6) Smoke ===
+prompt === 4) Smoke ===
 @@../scripts/smoke.sql
 
 prompt === install.sql done ===
