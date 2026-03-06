@@ -12,42 +12,51 @@ create or replace package body ai_sql_guard as
     o_reason    out varchar2,
     o_view_used out varchar2
   ) is
-    l_sql      clob;
-    l_u        clob;
-    l_limit    number := norm_limit(p_limit);
-    l_cur      integer;
-    l_view     varchar2(128);
-    l_occ      number := 1;
-    l_found    number := 0;
-    l_enabled  number;
+    l_sql_v   varchar2(32767);
+    l_u       varchar2(32767);
+    l_limit   number := norm_limit(p_limit);
+    l_cur     integer;
+    l_view    varchar2(128);
+    l_occ     number := 1;
+    l_found   number := 0;
+    l_enabled number;
   begin
     o_sql_out := null;
     o_status := 'ERROR';
     o_reason := null;
     o_view_used := null;
 
-    l_sql := trim(p_sql_in);
-
-    if l_sql is null then
+    if p_sql_in is null then
       o_status := 'BLOCKED';
       o_reason := 'EMPTY_SQL';
       return;
     end if;
 
-    -- usuń trailing ';'
-    if substr(l_sql, -1) = ';' then
-      l_sql := substr(l_sql, 1, length(l_sql)-1);
-    end if;
+    l_sql_v := dbms_lob.substr(p_sql_in, 32767, 1);
+    l_sql_v := replace(l_sql_v, chr(65279), ''); -- BOM
+    l_sql_v := trim(l_sql_v);
 
-    l_u := upper(l_sql);
-
-    if not regexp_like(l_u, '^\s*SELECT\b') then
+    if l_sql_v is null then
       o_status := 'BLOCKED';
-      o_reason := 'ONLY_SELECT_ALLOWED';
+      o_reason := 'EMPTY_SQL';
       return;
     end if;
 
-    if regexp_like(l_u, '\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COMMIT|ROLLBACK|BEGIN|DECLARE)\b') then
+    if substr(l_sql_v, -1) = ';' then
+      l_sql_v := substr(l_sql_v, 1, length(l_sql_v)-1);
+    end if;
+
+    l_u := upper(l_sql_v);
+
+    if not (l_u like 'SELECT%' or l_u like 'WITH%') then
+    o_status := 'BLOCKED';
+    o_reason := 'ONLY_SELECT_ALLOWED';
+    return;
+    end if;
+
+    l_u := upper(l_sql_v);
+
+    if regexp_like(l_u,'(^|[^A-Z0-9_])(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COMMIT|ROLLBACK|BEGIN|DECLARE)([^A-Z0-9_]|$)') then
       o_status := 'BLOCKED';
       o_reason := 'FORBIDDEN_KEYWORD';
       return;
@@ -65,32 +74,25 @@ create or replace package body ai_sql_guard as
       return;
     end if;
 
-    -- twardo blokuj dostęp do tabel SALES_* i widoków V_SALES_* (v1 whitelist tylko AI_V_*)
     if regexp_like(l_u, '\bSALES_[A-Z0-9_]+\b') or regexp_like(l_u, '\bV_SALES_[A-Z0-9_]+\b') then
       o_status := 'BLOCKED';
       o_reason := 'ONLY_AI_VIEWS_ALLOWED';
       return;
     end if;
 
-    -- sprawdź, czy wszystkie wystąpienia AI_V_SALES_* są w whitelist
     loop
       l_view := regexp_substr(l_u, 'AI_V_SALES_[A-Z0-9_]+', 1, l_occ);
       exit when l_view is null;
 
       l_occ := l_occ + 1;
       l_found := 1;
-      o_view_used := l_view; -- ostatni, wystarczy do logu v0
+      o_view_used := l_view;
 
-      begin
-        select count(*)
-          into l_enabled
-          from ai_nl2sql_whitelist
-         where view_name = l_view
-           and enabled_yn = 'Y';
-      exception
-        when others then
-          l_enabled := 0;
-      end;
+      select count(*)
+        into l_enabled
+        from ai_nl2sql_whitelist
+       where view_name = l_view
+         and enabled_yn = 'Y';
 
       if l_enabled = 0 then
         o_status := 'BLOCKED';
@@ -105,14 +107,12 @@ create or replace package body ai_sql_guard as
       return;
     end if;
 
-    -- dołóż limit jeśli nie ma FETCH FIRST
-    if not regexp_like(l_u, '\bFETCH\s+FIRST\s+\d+\s+ROWS\s+ONLY\b') then
-      o_sql_out := l_sql || ' fetch first ' || to_char(l_limit) || ' rows only';
+    if instr(l_u, 'FETCH FIRST') = 0 then
+      o_sql_out := to_clob(rtrim(l_sql_v) || ' fetch first ' || to_char(l_limit) || ' rows only');
     else
-      o_sql_out := l_sql;
+      o_sql_out := to_clob(rtrim(l_sql_v));
     end if;
 
-    -- parse (twardy sanity)
     l_cur := dbms_sql.open_cursor;
     begin
       dbms_sql.parse(l_cur, o_sql_out, dbms_sql.native);
@@ -120,7 +120,7 @@ create or replace package body ai_sql_guard as
       when others then
         o_status := 'BLOCKED';
         o_reason := 'PARSE_ERROR: ' || substr(sqlerrm, 1, 900);
-        dbms_sql.close_cursor(l_cur);
+        if dbms_sql.is_open(l_cur) then dbms_sql.close_cursor(l_cur); end if;
         return;
     end;
     dbms_sql.close_cursor(l_cur);
