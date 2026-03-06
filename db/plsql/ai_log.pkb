@@ -24,7 +24,7 @@ create or replace package body ai_log as
       guard_status, exec_status, row_count, llm_ms, exec_ms, err_code, err_msg
     ) values (
       p_request_id, p_app_user, substr(p_question,1,4000), p_view_used, p_sql_text,
-      p_guard_status, p_exec_status, p_row_count, p_llm_ms, p_exec_ms, p_err_code, substr(p_err_msg,1,4000)
+      substr(p_guard_status,1,30), substr(p_exec_status,1,30), p_row_count, p_llm_ms, p_exec_ms, p_err_code, substr(p_err_msg,1,4000)
     );
   end;
 end ai_log;
